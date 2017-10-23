@@ -6,13 +6,18 @@ import android.util.Log;
 import android.widget.Toast;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.healthyfish.healthyfishdoctor.MainActivity;
 import com.healthyfish.healthyfishdoctor.MyApplication;
 import com.healthyfish.healthyfishdoctor.POJO.BeanBaseKeyGetReq;
 import com.healthyfish.healthyfishdoctor.POJO.BeanBaseKeyGetResp;
 import com.healthyfish.healthyfishdoctor.POJO.BeanCourseOfDisease;
+import com.healthyfish.healthyfishdoctor.POJO.BeanInspectionReport;
 import com.healthyfish.healthyfishdoctor.POJO.BeanInterrogationServiceUserList;
 import com.healthyfish.healthyfishdoctor.POJO.BeanMedRec;
 import com.healthyfish.healthyfishdoctor.POJO.BeanMedRecUser;
+import com.healthyfish.healthyfishdoctor.POJO.BeanPersonalInformation;
+import com.healthyfish.healthyfishdoctor.POJO.BeanPrescriptiom;
 import com.healthyfish.healthyfishdoctor.POJO.BeanUserLoginReq;
 import com.healthyfish.healthyfishdoctor.POJO.ImMsgBean;
 import com.healthyfish.healthyfishdoctor.R;
@@ -21,6 +26,7 @@ import com.healthyfish.healthyfishdoctor.ui.activity.medical_record.AllMedRec;
 import com.healthyfish.healthyfishdoctor.utils.DateTimeUtil;
 import com.healthyfish.healthyfishdoctor.utils.OkHttpUtils;
 import com.healthyfish.healthyfishdoctor.utils.RetrofitManagerUtils;
+import com.healthyfish.healthyfishdoctor.utils.SendNotificationsUtils;
 
 import org.eclipse.paho.client.mqttv3.IMqttActionListener;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -38,12 +44,13 @@ import org.litepal.crud.DataSupport;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 import okhttp3.ResponseBody;
 import rx.Subscriber;
 
-import static com.healthyfish.healthyfishdoctor.utils.mqtt_utils.MqttUtil.beanMedRecUser;
+import static com.healthyfish.healthyfishdoctor.constant.Constants.HttpHealthyFishyUrl;
 import static com.healthyfish.healthyfishdoctor.utils.mqtt_utils.MqttUtil.userName;
 
 
@@ -121,7 +128,7 @@ public class MqttUtil {
     public static String userName = beanUserLoginReq.getMobileNo();
     public static String userPwd = beanUserLoginReq.getPwdSHA256();
 
-    public static BeanMedRecUser beanMedRecUser = new BeanMedRecUser();
+    //public static BeanMedRecUser beanMedRecUser = new BeanMedRecUser();
 
     static Handler pingHandler = new Handler();
     static Runnable pingRunnable = new Runnable() {
@@ -304,6 +311,9 @@ public class MqttUtil {
                     break;
                 case "i":
                     bs.write((bean.getType() + bean.getImgUrl()).getBytes());
+                    break;
+                case "$":
+                    bs.write((bean.getType() + bean.getContent()).getBytes());
                     break;
             }
             if (mqttAsyncClient == null) {
@@ -523,12 +533,15 @@ class PushCallback implements MqttCallback {
                     }*/
                 switch (type) {
                     case '$': {//用户级系统消息，建立会话，下线
-                        byte sysMsg = payload[2 + uid_len];
-                        int msg_len = payload.length - uid_len - 3;
+                        // byte sysMsg = payload[2 + uid_len];
+                        int msg_len = payload.length - uid_len - 2;
                         byte[] msg_array = new byte[msg_len];
-                        System.arraycopy(payload, 3 + uid_len, msg_array, 0, msg_len);
+                        System.arraycopy(payload, 2 + uid_len, msg_array, 0, msg_len);
+                        String content = new String(msg_array, "utf-8");
 
-                        byte msgCmd = (byte) (sysMsg & MqttUtil.MASK_MSG);
+                        MqttMsgSystemInfo.process(bean, peer, content, topic);
+
+                        /*byte msgCmd = (byte) (sysMsg & MqttUtil.MASK_MSG);
 //                        byte msgType =(byte) (sysMsg & MqttUtil.MASK_ACK);
                         switch (msgCmd) {
                             case MqttUtil.MSG_SYS_CreateChannel:
@@ -544,7 +557,7 @@ class PushCallback implements MqttCallback {
                                 // 状态改变
                                 // MqttUserStatusChange.process(peer, msgCmd);
                                 break;
-                        }
+                        }*/
                         break;
                     }
 
@@ -553,7 +566,7 @@ class PushCallback implements MqttCallback {
                         byte[] msg_array = new byte[msg_len];
                         System.arraycopy(payload, 2 + uid_len, msg_array, 0, msg_len);
                         String content = new String(msg_array, "utf-8");
-                        // TODO: 2017/7/27 保存msg
+
                         MqttMsgText.process(bean, peer, content, topic);
                         break;
                     }
@@ -575,6 +588,25 @@ class PushCallback implements MqttCallback {
                         MqttMsgImage.process(bean, peer, url, topic);
                         break;
                     }
+
+                    case 'r': {//化验单
+                        int msg_len = payload.length - uid_len - 2;
+                        byte[] msg_array = new byte[msg_len];
+                        System.arraycopy(payload, 2 + uid_len, msg_array, 0, msg_len);
+                        String content = new String(msg_array, "utf-8");
+                        MqttMsgRept.process(bean, peer, content, topic);
+                        break;
+                    }
+
+                    case 'p': {//处方
+                        int msg_len = payload.length - uid_len - 2;
+                        byte[] msg_array = new byte[msg_len];
+                        System.arraycopy(payload, 2 + uid_len, msg_array, 0, msg_len);
+                        String content = new String(msg_array, "utf-8");
+                        MqttMsgPres.process(bean, peer, content, topic);
+                        break;
+                    }
+
                     case 'v': //video
                         break;
                     case 'a': //audio
@@ -583,6 +615,75 @@ class PushCallback implements MqttCallback {
             }
         }
 
+    }
+}
+
+class MqttMsgSystemInfo {
+    public static void process(ImMsgBean bean, String peer, String content, String topic) {
+        // 要显示的内容
+        bean.setContent(content);
+        bean.setToDefault("isSender");
+        bean.setName(peer);
+
+        bean.setTime(DateTimeUtil.getLongMs());
+        bean.setType("$");
+        bean.setTopic(topic);
+        bean.setNewMsg(true);
+        bean.save();
+
+        // 判断是否保存了该用户信息，如果已经保存该信息，则无视，如果没有保存，新建一条记录
+        whetherTheUserExist(bean);
+    }
+
+    private static void whetherTheUserExist(final ImMsgBean bean) {
+        ImMsgBean user = DataSupport.findLast(ImMsgBean.class);
+        List<BeanInterrogationServiceUserList> list = DataSupport.where("peerName = ?", user.getName().substring(1)).find(BeanInterrogationServiceUserList.class);
+        if (list.isEmpty()) {
+            final String key = "info_" + user.getName().substring(1);
+            BeanBaseKeyGetReq beanBaseKeyGetReq = new BeanBaseKeyGetReq();
+            beanBaseKeyGetReq.setKey(key);
+
+            final BeanInterrogationServiceUserList userList = new BeanInterrogationServiceUserList();
+            userList.setPeerNumber(user.getName().substring(1));
+
+            RetrofitManagerUtils.getInstance(MyApplication.getContetxt(), null).getHealthyInfoByRetrofit(OkHttpUtils.getRequestBody(beanBaseKeyGetReq), new Subscriber<ResponseBody>() {
+                String resp = null;
+
+                @Override
+                public void onCompleted() {
+                    BeanBaseKeyGetResp beanBaseKeyGetResp = JSON.parseObject(resp, BeanBaseKeyGetResp.class);
+                    String strJsonBeanPersonalInformation = beanBaseKeyGetResp.getValue();
+                    BeanPersonalInformation beanPersonalInformation = JSON.parseObject(strJsonBeanPersonalInformation, BeanPersonalInformation.class);
+
+                    if (beanPersonalInformation != null) {
+                        userList.setPeerName(beanPersonalInformation.getNickname());
+                        userList.setPeerPortrait(HttpHealthyFishyUrl + beanPersonalInformation.getImgUrl());
+                    }
+                    // 比对数据库，如果名字头像或者发生变化了，重新写入
+                    List<BeanInterrogationServiceUserList> contrastUserList = DataSupport.where("PeerNumber = ?", userList.getPeerNumber()).find(BeanInterrogationServiceUserList.class);
+                    if (contrastUserList.isEmpty() || contrastUserList.get(0).getPeerName() != userList.getPeerName()
+                            || contrastUserList.get(0).getPeerPortrait() != userList.getPeerPortrait()) {
+                        userList.saveOrUpdate("PeerNumber = ?", userList.getPeerNumber());
+                    }
+                    /*if (contrastUserList.isEmpty()) {
+                        userList.save();
+                    }*/
+                }
+
+                @Override
+                public void onError(Throwable e) {
+                }
+
+                @Override
+                public void onNext(ResponseBody responseBody) {
+                    try {
+                        resp = responseBody.string();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -607,6 +708,16 @@ class MqttMsgText {
         bean.setTopic(topic);
         bean.setNewMsg(true);
         bean.save();
+//        Log.i("聊天列表bean","具体内容"+bean.getId()+bean.getMdrKey()+bean.getName()+
+//                bean.getContent()+bean.getTopic());
+//        List<ImMsgBean > list = new ArrayList<>();
+//        list = DataSupport.findAll(ImMsgBean.class);
+//        for (int i = 0 ;i<list.size();i++) {
+//            Log.i("聊天列表bean","具体内容"+list.get(i).getId()+list.get(i).getMdrKey()+list.get(i).getName()+
+//                    list.get(i).getContent()+list.get(i).getTopic());
+//        }
+        // 系统通知
+        SendNotificationsUtils.sendNotifications("健鱼", "收到一条文本信息", MainActivity.class);
         EventBus.getDefault().post(new WeChatReceiveMsg(bean.getTime()));
 
     }
@@ -626,33 +737,62 @@ class MqttMsgMdr {
         bean.setTopic(topic);
         bean.setNewMsg(true);
         bean.save();
-
-        // 通过key获取病历
-        keyGet(bean);
-
+        // 系统通知
+        SendNotificationsUtils.sendNotifications("健鱼", "收到一条病历信息", MainActivity.class);
         // 获取新的信息
         EventBus.getDefault().post(new WeChatReceiveMsg(bean.getTime()));
 
+        // 通过key获取病历
+        keyGet(bean);
     }
 
     // 通过key获取病历
     private static void keyGet(final ImMsgBean bean) {
+        BeanMedRecUser beanMedRecUser = new BeanMedRecUser();
         final BeanBaseKeyGetReq beanBaseKeyGetReq = new BeanBaseKeyGetReq();
+        // [mdr]medRec_1807720781820170925_4f08f124-5769-4236-a503-e76d6800d5ca
         final String key = bean.getContent().substring(5);
         if (DataSupport.where("name = ?", bean.getName().substring(1)).find(BeanMedRecUser.class).isEmpty()) {
             beanMedRecUser.setName(bean.getName().substring(1));
             beanMedRecUser.setImgUrl(DataSupport.where("peernumber = ?", bean.getName().substring(1)).find(BeanInterrogationServiceUserList.class).get(0).getPeerPortrait());
-            beanMedRecUser.setDate(bean.getTime()+"");
+            beanMedRecUser.setDate(bean.getTime() + "");
             beanMedRecUser.save();
         } else {
             beanMedRecUser = DataSupport.where("name = ?", bean.getName().substring(1)).find(BeanMedRecUser.class).get(0);
         }
         beanBaseKeyGetReq.setKey(key);
 
+        // 通过接收到的key获取病历
+        final BeanMedRecUser finalBeanMedRecUser = beanMedRecUser;
         RetrofitManagerUtils.getInstance(MyApplication.getContetxt(), null).getMedRecByRetrofit(OkHttpUtils.getRequestBody(beanBaseKeyGetReq), new Subscriber<ResponseBody>() {
+            String rspv = null;
+
             @Override
             public void onCompleted() {
 
+                if (!TextUtils.isEmpty(rspv)) {
+                    BeanBaseKeyGetResp object = JSON.parseObject(rspv, BeanBaseKeyGetResp.class);
+                    if (object.getValue() != null) {
+                        BeanMedRec beanMedRec = JSON.parseObject(object.getValue(), BeanMedRec.class);
+                        beanMedRec.setKey(key);
+                        beanMedRec.setBeanMedRecUser(finalBeanMedRecUser);
+                        if (DataSupport.where("key = ?", key).find(BeanMedRec.class).isEmpty()) {
+                            beanMedRec.save();
+                        } else if (!DataSupport.where("key = ?", key).find(BeanMedRec.class).isEmpty()) {
+                            List<BeanMedRec> listBeanMedRec = DataSupport.where("key = ?", key).find(BeanMedRec.class);
+                            listBeanMedRec.get(0).delete();
+                            beanMedRec.save();
+                        }
+                        List<BeanCourseOfDisease> courseOfDiseaseList = beanMedRec.getListCourseOfDisease();
+                        for (BeanCourseOfDisease courseOfDisease : courseOfDiseaseList) {
+                            courseOfDisease.setBeanMedRec(beanMedRec);
+                            courseOfDisease.save();
+                        }
+                    } else {
+                            /*nullValueKey.add(key);
+                            hasNullValueKey = true;*/
+                    }
+                }
             }
 
             @Override
@@ -663,24 +803,7 @@ class MqttMsgMdr {
             @Override
             public void onNext(ResponseBody responseBody) {
                 try {
-                    String rspv = responseBody.string();
-                    if (!TextUtils.isEmpty(rspv)) {
-                        BeanBaseKeyGetResp object = JSON.parseObject(rspv, BeanBaseKeyGetResp.class);
-                        if (object.getValue() != null) {
-                            BeanMedRec beanMedRec = JSON.parseObject(object.getValue(), BeanMedRec.class);
-                            beanMedRec.setKey(key);
-                            beanMedRec.setBeanMedRecUser(beanMedRecUser);
-                            beanMedRec.save();
-                            List<BeanCourseOfDisease> courseOfDiseaseList = beanMedRec.getListCourseOfDisease();
-                            for (BeanCourseOfDisease courseOfDisease : courseOfDiseaseList) {
-                                courseOfDisease.setBeanMedRec(beanMedRec);
-                                courseOfDisease.save();
-                            }
-                        } else {
-                            /*nullValueKey.add(key);
-                            hasNullValueKey = true;*/
-                        }
-                    }
+                    rspv = responseBody.string();
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -688,6 +811,180 @@ class MqttMsgMdr {
         });
     }
 }
+
+class MqttMsgRept {
+
+    // 接收化验单
+    public static void process(ImMsgBean bean, String peer, String content, String topic) {
+        // 要显示的内容
+        bean.setContent(content);
+        bean.setToDefault("isSender");
+        bean.setName(peer);
+
+        bean.setTime(DateTimeUtil.getLongMs());
+        bean.setType("r");
+        bean.setTopic(topic);
+        bean.setNewMsg(true);
+        bean.save();
+
+        // 系统通知
+        SendNotificationsUtils.sendNotifications("健鱼", "收到一条化验单信息", MainActivity.class);
+        // 获取新的信息
+        EventBus.getDefault().post(new WeChatReceiveMsg(bean.getTime()));
+      
+        // 通过key获取化验单
+        keyGetRept(bean);
+    }
+
+    private static void keyGetRept(ImMsgBean bean) {
+        BeanMedRecUser beanMedRecUser = new BeanMedRecUser();
+        final BeanBaseKeyGetReq beanBaseKeyGetReq = new BeanBaseKeyGetReq();
+        // [mdr]medRec_1807720781820170925_4f08f124-5769-4236-a503-e76d6800d5ca
+        final String key = bean.getContent().substring(5);
+        if (DataSupport.where("name = ?", bean.getName().substring(1)).find(BeanMedRecUser.class).isEmpty()) {
+            beanMedRecUser.setName(bean.getName().substring(1));
+            beanMedRecUser.setImgUrl(DataSupport.where("peernumber = ?", bean.getName().substring(1)).find(BeanInterrogationServiceUserList.class).get(0).getPeerPortrait());
+            beanMedRecUser.setDate(bean.getTime() + "");
+            beanMedRecUser.save();
+        } else {
+            beanMedRecUser = DataSupport.where("name = ?", bean.getName().substring(1)).find(BeanMedRecUser.class).get(0);
+        }
+        beanBaseKeyGetReq.setKey(key);
+
+        // 通过接收到的key获取病历
+        RetrofitManagerUtils.getInstance(MyApplication.getContetxt(), null).getMedRecByRetrofit(OkHttpUtils.getRequestBody(beanBaseKeyGetReq), new Subscriber<ResponseBody>() {
+            String rspv = null;
+
+            @Override
+            public void onCompleted() {
+
+                if (!TextUtils.isEmpty(rspv)) {
+                    BeanInspectionReport beanInspectionReport;
+                    BeanBaseKeyGetResp object = JSON.parseObject(rspv, BeanBaseKeyGetResp.class);
+                    if (object.getValue() != null) {
+                        beanInspectionReport = JSON.parseObject(object.getValue(), BeanInspectionReport.class);
+                        if (DataSupport.where("key = ? ", beanInspectionReport.getKey()).find(BeanInspectionReport.class).isEmpty()) {
+                            beanInspectionReport.setSPECIMEN(JSON.toJSONString(beanInspectionReport.getTestList()));
+                            beanInspectionReport.save();
+                        } //删除原来key的数据再保存的意义是在列表显示的时候可以通过倒序把最新接收到的放在第一位
+                        else if (!DataSupport.where("key = ? ", beanInspectionReport.getKey()).find(BeanInspectionReport.class).isEmpty()) {
+                            List<BeanInspectionReport> listBeanInspectionReport = DataSupport.where("key = ?", key).find(BeanInspectionReport.class);
+                            listBeanInspectionReport.get(0).delete();
+                            beanInspectionReport.setSPECIMEN(JSON.toJSONString(beanInspectionReport.getTestList()));
+                            beanInspectionReport.save();
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                Toast.makeText(MyApplication.getContetxt(), "出错啦", Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onNext(ResponseBody responseBody) {
+                try {
+                    rspv = responseBody.string();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+
+
+    }
+}
+
+
+class MqttMsgPres{
+    // 接收处方
+    public static void process(ImMsgBean bean, String peer, String content, String topic) {
+        // 要显示的内容
+        bean.setContent(content);
+        bean.setToDefault("isSender");
+        bean.setName(peer);
+
+        bean.setTime(DateTimeUtil.getLongMs());
+        bean.setType("p");
+        bean.setTopic(topic);
+        bean.setNewMsg(true);
+        bean.save();
+
+        // 系统通知
+        SendNotificationsUtils.sendNotifications("健鱼", "收到一条处方信息", MainActivity.class);
+        // 获取新的信息
+        EventBus.getDefault().post(new WeChatReceiveMsg(bean.getTime()));
+        // 通过key获取处方
+        keyGetPres(bean);
+    }
+
+    private static void keyGetPres(ImMsgBean bean) {
+        BeanMedRecUser beanMedRecUser = new BeanMedRecUser();
+        final BeanBaseKeyGetReq beanBaseKeyGetReq = new BeanBaseKeyGetReq();
+        final String key = bean.getContent().substring(5);
+        if (DataSupport.where("name = ?", bean.getName().substring(1)).find(BeanMedRecUser.class).isEmpty()) {
+            beanMedRecUser.setName(bean.getName().substring(1));
+            beanMedRecUser.setImgUrl(DataSupport.where("peernumber = ?", bean.getName().substring(1)).find(BeanInterrogationServiceUserList.class).get(0).getPeerPortrait());
+            beanMedRecUser.setDate(bean.getTime() + "");
+            beanMedRecUser.save();
+        } else {
+            beanMedRecUser = DataSupport.where("name = ?", bean.getName().substring(1)).find(BeanMedRecUser.class).get(0);
+        }
+        beanBaseKeyGetReq.setKey(key);
+
+        // 通过接收到的key获取处方
+        RetrofitManagerUtils.getInstance(MyApplication.getContetxt(), null).getMedRecByRetrofit(OkHttpUtils.getRequestBody(beanBaseKeyGetReq), new Subscriber<ResponseBody>() {
+            String rspv = null;
+
+            @Override
+            public void onCompleted() {
+
+
+                if (!TextUtils.isEmpty(rspv)) {
+                    BeanBaseKeyGetResp object = JSON.parseObject(rspv, BeanBaseKeyGetResp.class);
+                    BeanPrescriptiom beanPrescriptiom = JSON.parseObject(object.getValue(), BeanPrescriptiom.class);
+                    //判断当前请求回来的key是否存在，不存在的话保存到数据库中
+                    if (DataSupport.where("key = ? ", beanPrescriptiom.getKey()).find(BeanPrescriptiom.class).isEmpty()) {
+                        List<BeanPrescriptiom.PresListBean> preslist = beanPrescriptiom.getPresList();
+                        for (BeanPrescriptiom.PresListBean presBean : preslist) {//目前只有一个药，所以执行一遍直接break掉
+                            //presBean打包成JsonStr，set到ITEM_CLASS（因为这个数据项（ITEM_CLASS）没有用到，所以用来存放presBean打包成的JsonStr）
+                            beanPrescriptiom.setITEM_CLASS(JSON.toJSONString(presBean));
+                            break;
+                        }//保存到数据库
+                        beanPrescriptiom.save();
+                    }//删除原来key的数据再保存的意义是在列表显示的时候可以通过倒序把最新接收到的放在第一位
+                    else if (!DataSupport.where("key = ? ", beanPrescriptiom.getKey()).find(BeanPrescriptiom.class).isEmpty()){
+                        List<BeanPrescriptiom> listBeanPresctiptiom = DataSupport.where("key = ?", key).find(BeanPrescriptiom.class);
+                        listBeanPresctiptiom.get(0).delete();//先删除原来的
+                        List<BeanPrescriptiom.PresListBean> preslist = beanPrescriptiom.getPresList();
+                        for (BeanPrescriptiom.PresListBean presBean : preslist) {//目前只有一个药，所以执行一遍直接break掉
+                            //presBean打包成JsonStr，set到ITEM_CLASS（因为这个数据项（ITEM_CLASS）没有用到，所以用来存放presBean打包成的JsonStr）
+                            beanPrescriptiom.setITEM_CLASS(JSON.toJSONString(presBean));
+                            break;
+                        }
+                        beanPrescriptiom.save();
+                    }
+                }
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                Toast.makeText(MyApplication.getContetxt(), "出错啦", Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onNext(ResponseBody responseBody) {
+                try {
+                    rspv = responseBody.string();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+    }
+}
+
 //i|len|<src="...">|img_bytes
 class MqttMsgImage {
     public static void process(ImMsgBean bean, String peer, String url, String topic) {
@@ -705,6 +1002,10 @@ class MqttMsgImage {
         bean.setTopic(topic);
         bean.setNewMsg(true);
         bean.save();
+
+
+        // 系统通知
+        SendNotificationsUtils.sendNotifications("健鱼", "收到一条图片信息", MainActivity.class);
         EventBus.getDefault().post(new WeChatReceiveMsg(bean.getTime()));
     }
 }

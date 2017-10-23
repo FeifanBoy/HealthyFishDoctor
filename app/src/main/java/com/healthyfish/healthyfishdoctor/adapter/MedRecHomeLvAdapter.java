@@ -8,8 +8,10 @@ import android.widget.BaseAdapter;
 import android.widget.TextView;
 
 
+import com.bumptech.glide.Glide;
 import com.healthyfish.healthyfishdoctor.POJO.BeanMedRecUser;
 import com.healthyfish.healthyfishdoctor.R;
+import com.healthyfish.healthyfishdoctor.utils.DateTimeUtil;
 import com.zhy.autolayout.utils.AutoUtils;
 
 import java.util.List;
@@ -65,10 +67,9 @@ public class MedRecHomeLvAdapter extends BaseAdapter {
         } else {
             holder = (ViewHolder) convertView.getTag();
         }
-//        Glide.with(mContext).load(listUser.get(position).getImgUrl()).placeholder(R.mipmap.placeholder)
-//                .error(R.mipmap.error).into(holder.img);
+        Glide.with(mContext).load(listUser.get(position).getImgUrl()).error(R.mipmap.error).centerCrop().into(holder.img);
         holder.name.setText(listUser.get(position).getName()+"的病历夹");
-        holder.date.setText(listUser.get(position).getDate());
+        holder.date.setText(DateTimeUtil.getTime(Long.valueOf(listUser.get(position).getDate())));
         return convertView;
     }
 

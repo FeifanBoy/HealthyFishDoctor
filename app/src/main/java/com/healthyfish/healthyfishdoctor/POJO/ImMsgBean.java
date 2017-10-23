@@ -16,6 +16,12 @@ public class ImMsgBean extends DataSupport implements Serializable{
     public final static int CHAT_MSGTYPE_IMG_SENDER = 13;
     public final static int CHAT_MSGTYPE_MDR_SENDER = 14;
     public final static int CHAT_MSGTYPE_MDR_RECEIVER = 15;
+    public final static int CHAT_MSGTYPE_SYS_SENDER = 16;
+    public final static int CHAT_MSGTYPE_SYS_RECEIVER = 17;
+    public final static int CHAT_MSGTYPE_REPT_SENDER = 18;
+    public final static int CHAT_MSGTYPE_REPT_RECEIVER = 19;
+    public final static int CHAT_MSGTYPE_PRES_SENDER = 20;
+    public final static int CHAT_MSGTYPE_PRES_RECEIVER = 21;
 
 
     public ImMsgBean() {
@@ -37,7 +43,7 @@ public class ImMsgBean extends DataSupport implements Serializable{
     private long time;
     // 图片内容
     private String image;
-    // 发送姓名
+    // 发送姓名(手机号码)
     private String name;
     // 发送内容
     private String content;
@@ -48,7 +54,7 @@ public class ImMsgBean extends DataSupport implements Serializable{
     private String topic;
     // 发送者肖像
     private String portrait;
-    // 发送电子病历的key
+    // 发送电子病历的key(包含化验单、处方)
     private String mdrKey;
     // 是发送者还是接收者
     private boolean isSender = false;
